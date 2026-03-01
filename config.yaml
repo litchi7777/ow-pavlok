@@ -8,10 +8,10 @@ monitor:
   white_ratio_trigger: 0.25  # 監視領域の25%以上が白 → デス判定
   cooldown_seconds: 15       # 電撃後のクールダウン
   watch_region:
-    x: 15
-    y: 880
-    width: 165
-    height: 180
+    x: 57
+    y: 892
+    width: 100
+    height: 100
 
 display:
   resolution: "1920x1080"
