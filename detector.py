@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Overwatch 2 Death Detector
-プレイ中判定: OWがフォアグラウンド AND アイコン左右端が水色
-デス判定:    白ピクセル割合が閾値以上
+
+プレイ中判定: OWフォアグラウンド AND アイコン左右端（中央50%）が水色
+デス判定:    白ピクセル割合が閾値以上（デス時は水色フレームも白く飛ぶため水色チェック不要）
 """
 import time
 import numpy as np
@@ -31,24 +32,31 @@ def is_ow_foreground():
         return False
 
 
-def check_icon_state(img_bgr, white_threshold=180, white_ratio_trigger=0.25):
-    edge = 10
-    left_bgr  = img_bgr[:, :edge, :].mean(axis=(0, 1))
-    right_bgr = img_bgr[:, -edge:, :].mean(axis=(0, 1))
+def get_edge_rgb(img_bgr, edge=10):
+    """左右端の中央50%のRGB平均（BGR順で返す）"""
+    h = img_bgr.shape[0]
+    y1, y2 = h // 4, h * 3 // 4
+    lb = img_bgr[y1:y2, :edge,  :].mean(axis=(0, 1))  # [B,G,R]
+    rb = img_bgr[y1:y2, -edge:, :].mean(axis=(0, 1))
+    return lb, rb
 
-    def is_cyan(bgr):
-        b, g, r = bgr
-        return g > 100 and b > 140 and b > r + 60
 
-    left_cyan  = is_cyan(left_bgr)
-    right_cyan = is_cyan(right_bgr)
-    cyan_ok    = left_cyan and right_cyan
+def is_cyan(bgr):
+    """水色判定（実測: G:100-142, B:146-181, R:51-108）"""
+    b, g, r = bgr
+    return g > 90 and b > 130 and b > r + 30
 
-    white_mask  = np.all(img_bgr > white_threshold, axis=2)
-    white_ratio = white_mask.mean()
-    is_death    = white_ratio >= white_ratio_trigger
 
-    return cyan_ok, is_death, white_ratio, left_cyan, right_cyan
+def check_state(img_bgr, white_threshold=180, white_ratio_trigger=0.25):
+    lb, rb = get_edge_rgb(img_bgr)
+    lc = is_cyan(lb)
+    rc = is_cyan(rb)
+    cyan_ok = lc and rc
+
+    white_ratio = np.all(img_bgr > white_threshold, axis=2).mean()
+    is_death = white_ratio >= white_ratio_trigger
+
+    return cyan_ok, is_death, white_ratio, lc, rc
 
 
 class DeathDetector:
@@ -73,87 +81,82 @@ class DeathDetector:
         print(f"[{self._ts()}] Death Detector 起動")
         print(f"監視領域: x={self.watch_region['x']}, y={self.watch_region['y']}, "
               f"w={self.watch_region['width']}, h={self.watch_region['height']}")
-        print(f"FPS: {self.fps} | 白割合閾値: {self.white_ratio_trigger} | 確認: {self.confirm_frames}フレーム")
-        print(f"プレイ中判定: OWフォアグラウンド AND 左右端が水色")
+        print(f"FPS: {self.fps} | 白閾値: {self.white_ratio_trigger} | 確認: {self.confirm_frames}フレーム")
+        print(f"プレイ中: OWフォーカス AND 左右端水色 | デス: 白割合のみで判定（水色フレームは飛ぶため）")
         print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒\n")
-        print(f"[{self._ts()}] 監視開始...")
 
     def _ts(self):
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    def capture_region(self):
-        monitor = {
-            'left':   self.watch_region['x'],
-            'top':    self.watch_region['y'],
-            'width':  self.watch_region['width'],
-            'height': self.watch_region['height']
-        }
-        return np.array(self.sct.grab(monitor))[:, :, :3]
+    def capture(self):
+        w = self.watch_region
+        m = {'left': w['x'], 'top': w['y'], 'width': w['width'], 'height': w['height']}
+        return np.array(self.sct.grab(m))[:, :, :3]
 
     def send_zap(self):
         try:
-            url     = "https://api.pavlok.com/api/v5/stimulus/send"
-            headers = {'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'}
-            payload = {"stimulus": {"stimulusType": "zap", "stimulusValue": self.zap_intensity}}
-            r = requests.post(url, headers=headers, json=payload, timeout=5)
+            r = requests.post(
+                "https://api.pavlok.com/api/v5/stimulus/send",
+                headers={'Authorization': f'Bearer {self.access_token}', 'Content-Type': 'application/json'},
+                json={"stimulus": {"stimulusType": "zap", "stimulusValue": self.zap_intensity}},
+                timeout=5
+            )
             if r.status_code == 200:
                 print(f"[{self._ts()}] ⚡ 電撃送信成功 (強度: {self.zap_intensity})")
                 return True
             print(f"[{self._ts()}] ⚠ API エラー: {r.status_code}")
-            return False
         except Exception as e:
             print(f"[{self._ts()}] ⚠ 通信エラー: {e}")
-            return False
+        return False
 
-    def is_cooldown(self):
+    def in_cooldown(self):
         if self.last_zap_time is None:
             return False
         return (datetime.now() - self.last_zap_time).total_seconds() < self.cooldown_seconds
 
     def run(self):
         interval = 1.0 / self.fps
+        print(f"[{self._ts()}] 監視開始...")
         try:
             while True:
-                t = time.time()
-
+                t0 = time.time()
                 ow_focus = is_ow_foreground()
-                img      = self.capture_region()
-                cyan_ok, is_death, white_ratio, left_cyan, right_cyan = check_icon_state(
+                img = self.capture()
+                cyan_ok, is_death, white_ratio, lc, rc = check_state(
                     img, self.white_threshold, self.white_ratio_trigger
                 )
 
-                # プレイ中 = OWフォアグラウンド AND 水色フレーム
+                # プレイ中 = OWフォーカス AND 水色フレーム
                 is_playing = ow_focus and cyan_ok
 
                 if is_playing and not self.was_playing:
                     print(f"[{self._ts()}] 🎮 プレイ中検知！監視開始。")
                 elif not is_playing and self.was_playing:
-                    print(f"[{self._ts()}] プレイ終了。監視停止。")
+                    print(f"[{self._ts()}] プレイ終了。待機中。")
                     self.death_counter = 0
                 self.was_playing = is_playing
 
-                if not is_playing:
-                    self.death_counter = 0
-                    time.sleep(max(0, interval - (time.time() - t)))
-                    continue
-
-                if is_death:
-                    self.death_counter += 1
-                    if self.death_counter == 1:
-                        print(f"[{self._ts()}] 💀 デス検知! 白:{white_ratio:.2f} ({self.death_counter}/{self.confirm_frames})")
-                    if self.death_counter >= self.confirm_frames:
-                        if self.is_cooldown():
-                            rem = self.cooldown_seconds - (datetime.now() - self.last_zap_time).total_seconds()
-                            print(f"[{self._ts()}] ⏳ クールダウン (残り {rem:.1f}秒)")
-                        else:
-                            print(f"[{self._ts()}] 💀 デス確定！電撃発動")
-                            if self.send_zap():
-                                self.last_zap_time = datetime.now()
+                # デス判定はプレイ中のみ（水色チェック不要、white_ratioのみ）
+                if is_playing or (ow_focus and white_ratio >= self.white_ratio_trigger):
+                    if is_death:
+                        self.death_counter += 1
+                        if self.death_counter == 1:
+                            print(f"[{self._ts()}] 💀 デス検知! 白:{white_ratio:.3f} ({self.death_counter}/{self.confirm_frames})")
+                        if self.death_counter >= self.confirm_frames:
+                            if self.in_cooldown():
+                                rem = self.cooldown_seconds - (datetime.now() - self.last_zap_time).total_seconds()
+                                print(f"[{self._ts()}] ⏳ クールダウン (残り {rem:.1f}秒)")
+                            else:
+                                print(f"[{self._ts()}] 💀 デス確定！電撃発動")
+                                if self.send_zap():
+                                    self.last_zap_time = datetime.now()
+                            self.death_counter = 0
+                    else:
                         self.death_counter = 0
                 else:
                     self.death_counter = 0
 
-                time.sleep(max(0, interval - (time.time() - t)))
+                time.sleep(max(0, interval - (time.time() - t0)))
 
         except KeyboardInterrupt:
             print(f"\n[{self._ts()}] 停止")
