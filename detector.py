@@ -44,7 +44,7 @@ def get_edge_rgb(img_bgr, edge=10):
 def is_cyan(bgr):
     """水色判定（実測: G:100-142, B:146-181, R:51-108）"""
     b, g, r = bgr
-    return g > 90 and b > 130 and b > r + 30
+    return g > 90 and b > 130
 
 
 def check_state(img_bgr, white_threshold=180, white_ratio_trigger=0.25):

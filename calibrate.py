@@ -36,9 +36,9 @@ def get_edge_rgb(img_bgr, edge=10):
     rb = img_bgr[y1:y2, -edge:, :].mean(axis=(0,1))
     return lb, rb
 
-def is_cyan(bgr, g_min=100, b_min=140, b_r_diff=60):
+def is_cyan(bgr, g_min=90, b_min=130, b_r_diff=0):
     b, g, r = bgr
-    return g > g_min and b > b_min and b > r + b_r_diff
+    return g > g_min and b > b_min
 
 def capture_region(sct, watch):
     monitor = {'left': watch['x'], 'top': watch['y'], 'width': watch['width'], 'height': watch['height']}
