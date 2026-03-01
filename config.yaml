@@ -1,17 +1,17 @@
 pavlok:
-  access_token: ""
+  access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6bnVsbCwiaWQiOjM3ODc4NywiZW1haWwiOiJsaXRjaGk3Nzc3QGdtYWlsLmNvbSIsImlzX2FwcGxpY2F0aW9uIjp0cnVlLCJleHAiOjE3ODY2NDE2NzQsInN1YiI6ImFjY2VzcyJ9.zm-0Wt4vLgjfXyWtIJhbM2GENa2_5JACcouiELc4rxU"
   zap_intensity: 30
 
 monitor:
-  fps: 2                    # キャプチャ頻度（秒間）
-  match_threshold: 0.7      # テンプレートマッチ閾値
-  cooldown_seconds: 10      # 電撃後のクールダウン
-  # 監視領域（ゲーム解像度に合わせて調整）
+  fps: 10                    # 0.1秒ごとにチェック（アニメが1秒未満なので高頻度に）
+  white_threshold: 180       # この値以上のRGB全チャンネル = 白ピクセル
+  white_ratio_trigger: 0.25  # 監視領域の25%以上が白 → デス判定
+  cooldown_seconds: 15       # 電撃後のクールダウン
   watch_region:
-    x: 0
-    y: 830
-    width: 200
-    height: 130
+    x: 15
+    y: 880
+    width: 165
+    height: 180
 
 display:
-  resolution: "1920x1080"   # ゲームの解像度
+  resolution: "1920x1080"
