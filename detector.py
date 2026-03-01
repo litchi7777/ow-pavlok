@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Overwatch 2 Death Detector
-プレイ中 & デス判定: OWフォアグラウンド AND 左右端水色（G>90, B>130）
-デス:               白ピクセル割合 >= 閾値
+プレイ中判定: OWフォアグラウンド AND 左右端水色（G>90, B>130）
+             水色が一瞬外れても exit_frames 連続Falseになるまでプレイ中を維持
+デス判定:    プレイ中に白ピクセル割合 >= 閾値
 """
 import time
 import numpy as np
@@ -32,7 +33,6 @@ def is_ow_foreground():
 
 
 def get_edge_rgb(img_bgr, edge=10):
-    """左右端の中央50%のBGR平均"""
     h = img_bgr.shape[0]
     y1, y2 = h // 4, h * 3 // 4
     lb = img_bgr[y1:y2, :edge,  :].mean(axis=(0, 1))
@@ -41,7 +41,6 @@ def get_edge_rgb(img_bgr, edge=10):
 
 
 def is_cyan(bgr):
-    """水色判定: G>90 and B>130"""
     b, g, r = bgr
     return g > 90 and b > 130
 
@@ -69,17 +68,20 @@ class DeathDetector:
         self.white_threshold     = self.config['monitor'].get('white_threshold', 180)
         self.white_ratio_trigger = self.config['monitor'].get('white_ratio_trigger', 0.25)
         self.confirm_frames      = self.config['monitor'].get('confirm_frames', 1)
+        # 水色がN回連続Falseでプレイ終了（10秒 = 100フレーム@fps10）
+        self.exit_frames         = self.config['monitor'].get('exit_frames', 100)
 
-        self.last_zap_time = None
-        self.was_playing   = False
-        self.death_counter = 0
-        self.sct           = mss()
+        self.last_zap_time    = None
+        self.is_playing       = False
+        self.not_cyan_counter = 0  # 水色Falseの連続カウント
+        self.death_counter    = 0
+        self.sct              = mss()
 
         print(f"[{self._ts()}] Death Detector 起動")
         print(f"監視: x={self.watch_region['x']}, y={self.watch_region['y']}, "
               f"w={self.watch_region['width']}, h={self.watch_region['height']}")
-        print(f"プレイ中 & デス: OWフォーカス AND 水色(G>90,B>130) → 白:{self.white_ratio_trigger}")
-        print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒\n")
+        print(f"プレイ中: OWフォーカス AND 水色(G>90,B>130) | 終了判定: {self.exit_frames}フレーム連続False({self.exit_frames/self.fps:.0f}秒)")
+        print(f"デス: 白割合>={self.white_ratio_trigger} | 電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒\n")
 
     def _ts(self):
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -122,16 +124,31 @@ class DeathDetector:
                     img, self.white_threshold, self.white_ratio_trigger
                 )
 
-                is_playing = ow_focus and cyan_ok
-
-                if is_playing and not self.was_playing:
-                    print(f"[{self._ts()}] 🎮 プレイ中検知！監視開始。")
-                elif not is_playing and self.was_playing:
-                    print(f"[{self._ts()}] プレイ終了。待機中。")
+                # プレイ中フラグの更新
+                if ow_focus and cyan_ok:
+                    # 水色OK → プレイ中確定、Falseカウンタリセット
+                    self.not_cyan_counter = 0
+                    if not self.is_playing:
+                        print(f"[{self._ts()}] 🎮 プレイ中検知！監視開始。")
+                        self.is_playing = True
+                elif ow_focus and self.is_playing:
+                    # OWフォーカス中だが水色が外れた → カウント
+                    self.not_cyan_counter += 1
+                    if self.not_cyan_counter >= self.exit_frames:
+                        print(f"[{self._ts()}] プレイ終了。待機中。")
+                        self.is_playing = False
+                        self.not_cyan_counter = 0
+                        self.death_counter = 0
+                else:
+                    # OWフォーカスなし → 即終了
+                    if self.is_playing:
+                        print(f"[{self._ts()}] OW非フォーカス。待機中。")
+                        self.is_playing = False
+                    self.not_cyan_counter = 0
                     self.death_counter = 0
-                self.was_playing = is_playing
 
-                if is_playing:
+                # デス判定（プレイ中のみ）
+                if self.is_playing:
                     if is_death:
                         self.death_counter += 1
                         if self.death_counter == 1:
