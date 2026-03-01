@@ -1,0 +1,17 @@
+pavlok:
+  access_token: "YOUR_TOKEN_HERE"
+  zap_intensity: 30
+
+monitor:
+  fps: 2                    # キャプチャ頻度（秒間）
+  match_threshold: 0.7      # テンプレートマッチ閾値
+  cooldown_seconds: 10      # 電撃後のクールダウン
+  # 監視領域（ゲーム解像度に合わせて調整）
+  watch_region:
+    x: 0
+    y: 830
+    width: 200
+    height: 130
+
+display:
+  resolution: "1920x1080"   # ゲームの解像度
