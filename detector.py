@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Overwatch 2 Death Detector
-OWがフォアグラウンドウィンドウの時のみ監視
+- OWがフォアグラウンドの時のみ監視
+- 連続N回検知して初めて電撃（一瞬のフォーカスを弾く）
+- 電撃直前にもOWアクティブを再確認
 """
 import time
 import numpy as np
@@ -11,7 +13,6 @@ import sys
 from mss import mss
 from datetime import datetime
 
-# Windows専用
 if sys.platform == 'win32':
     import win32gui
 else:
@@ -21,9 +22,8 @@ OW_WINDOW_KEYWORDS = ['overwatch', 'ow2']
 
 
 def is_ow_foreground():
-    """OWがフォアグラウンドウィンドウかチェック"""
     if win32gui is None:
-        return True  # Windows以外は常にTrue（テスト用）
+        return True
     try:
         hwnd = win32gui.GetForegroundWindow()
         title = win32gui.GetWindowText(hwnd).lower()
@@ -44,9 +44,12 @@ class DeathDetector:
         self.watch_region = self.config['monitor']['watch_region']
         self.white_threshold = self.config['monitor'].get('white_threshold', 180)
         self.white_ratio_trigger = self.config['monitor'].get('white_ratio_trigger', 0.25)
+        # 連続N回検知で初めて電撃（デフォルト3回 = 0.3秒）
+        self.confirm_frames = self.config['monitor'].get('confirm_frames', 3)
 
         self.last_zap_time = None
         self.ow_was_active = False
+        self.death_counter = 0  # 連続検知カウンタ
         self.sct = mss()
 
         print(f"[{self._ts()}] Death Detector 起動")
@@ -54,7 +57,7 @@ class DeathDetector:
               f"w={self.watch_region['width']}, h={self.watch_region['height']}")
         print(f"FPS: {self.fps} | 白ピクセル閾値: {self.white_threshold} | 発動割合: {self.white_ratio_trigger}")
         print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒")
-        print(f"OWウィンドウキーワード: {OW_WINDOW_KEYWORDS}\n")
+        print(f"確認フレーム数: {self.confirm_frames}回連続検知で電撃\n")
         print(f"[{self._ts()}] OWがアクティブになるのを待機中...")
 
     def _ts(self):
@@ -111,6 +114,7 @@ class DeathDetector:
                     if self.ow_was_active:
                         print(f"[{self._ts()}] OWが非アクティブ。監視一時停止。")
                         self.ow_was_active = False
+                    self.death_counter = 0  # OW離れたらカウンタリセット
                     time.sleep(1)
                     continue
 
@@ -122,13 +126,26 @@ class DeathDetector:
                 is_death, ratio = self.detect_death(img)
 
                 if is_death:
-                    print(f"[{self._ts()}] 💀 デス検知! (白割合: {ratio:.3f})")
-                    if self.is_cooldown():
-                        rem = self.cooldown_seconds - (datetime.now() - self.last_zap_time).total_seconds()
-                        print(f"[{self._ts()}] ⏳ クールダウン中 (残り {rem:.1f}秒)")
-                    else:
-                        if self.send_zap():
-                            self.last_zap_time = datetime.now()
+                    self.death_counter += 1
+                    if self.death_counter == 1:
+                        print(f"[{self._ts()}] 💀 デス候補検知 ({self.death_counter}/{self.confirm_frames}) 白割合: {ratio:.3f}")
+
+                    if self.death_counter >= self.confirm_frames:
+                        # 電撃直前にOWがまだアクティブか再確認
+                        if not is_ow_foreground():
+                            print(f"[{self._ts()}] ⚠ 電撃直前にOW非アクティブ検知 → キャンセル")
+                            self.death_counter = 0
+                        elif self.is_cooldown():
+                            rem = self.cooldown_seconds - (datetime.now() - self.last_zap_time).total_seconds()
+                            print(f"[{self._ts()}] ⏳ クールダウン中 (残り {rem:.1f}秒)")
+                            self.death_counter = 0
+                        else:
+                            print(f"[{self._ts()}] 💀 デス確定！電撃発動")
+                            if self.send_zap():
+                                self.last_zap_time = datetime.now()
+                            self.death_counter = 0
+                else:
+                    self.death_counter = 0  # 検知途切れたらリセット
 
                 time.sleep(max(0, interval - (time.time() - t)))
 
