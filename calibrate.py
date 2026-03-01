@@ -1,13 +1,52 @@
 #!/usr/bin/env python3
 """
-キャリブレーションツール - 白ピクセル割合の確認用
+キャリブレーションツール
+リアルタイムで「プレイ中」「デス」両状態を表示
 """
-import cv2
+import sys
+import time
 import numpy as np
 import yaml
-import time
 from mss import mss
 from datetime import datetime
+
+if sys.platform == 'win32':
+    import win32gui
+else:
+    win32gui = None
+
+OW_WINDOW_KEYWORDS = ['overwatch', 'ow2']
+
+
+def is_ow_foreground():
+    if win32gui is None:
+        return True
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        title = win32gui.GetWindowText(hwnd).lower()
+        return any(kw in title for kw in OW_WINDOW_KEYWORDS)
+    except Exception:
+        return False
+
+
+def check_icon_state(img_bgr, white_threshold=180, white_ratio_trigger=0.25):
+    edge = 10
+    left_bgr  = img_bgr[:, :edge, :].mean(axis=(0, 1))
+    right_bgr = img_bgr[:, -edge:, :].mean(axis=(0, 1))
+
+    def is_cyan(bgr):
+        b, g, r = bgr
+        return g > 100 and b > 140 and b > r + 60
+
+    left_cyan  = is_cyan(left_bgr)
+    right_cyan = is_cyan(right_bgr)
+    cyan_ok    = left_cyan and right_cyan
+
+    white_mask  = np.all(img_bgr > white_threshold, axis=2)
+    white_ratio = white_mask.mean()
+    is_death    = white_ratio >= white_ratio_trigger
+
+    return cyan_ok, is_death, white_ratio, left_cyan, right_cyan
 
 
 def load_config(config_path='config.yaml'):
@@ -15,83 +54,46 @@ def load_config(config_path='config.yaml'):
         return yaml.safe_load(f)
 
 
-def capture_watch_region(config):
-    watch_region = config['monitor']['watch_region']
-    monitor = {
-        'left': watch_region['x'],
-        'top': watch_region['y'],
-        'width': watch_region['width'],
-        'height': watch_region['height']
-    }
-    with mss() as sct:
-        screenshot = sct.grab(monitor)
-        img = np.array(screenshot)
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_path = f'calibrate_{timestamp}.png'
-        cv2.imwrite(output_path, img_bgr)
-        print(f"キャプチャ保存: {output_path}")
-        return img_bgr
-
-
-def analyze_white_ratio(img_bgr, config):
-    threshold = config['monitor'].get('white_threshold', 180)
-    trigger = config['monitor'].get('white_ratio_trigger', 0.25)
-    white_mask = np.all(img_bgr > threshold, axis=2)
-    ratio = white_mask.mean()
-    print(f"\n--- 白ピクセル分析 ---")
-    print(f"白ピクセル割合: {ratio:.3f} ({ratio*100:.1f}%)")
-    print(f"発動閾値: {trigger} ({trigger*100:.1f}%)")
-    if ratio >= trigger:
-        print("💀 デス判定！")
-    else:
-        print(f"✅ 通常状態 (あと {(trigger-ratio)*100:.1f}% で発動)")
-    return ratio
-
-
 def live_monitor(config):
-    print("\n=== リアルタイムモニター（Ctrl+Cで終了）===")
-    watch_region = config['monitor']['watch_region']
-    threshold = config['monitor'].get('white_threshold', 180)
-    trigger = config['monitor'].get('white_ratio_trigger', 0.25)
-    monitor = {
-        'left': watch_region['x'],
-        'top': watch_region['y'],
-        'width': watch_region['width'],
-        'height': watch_region['height']
-    }
+    print("=== リアルタイムモニター (Ctrl+C で終了) ===")
+    print("凡例: [OW=フォーカス] [水色=フレーム] [白=ドクロ] [状態]\n")
+
+    watch = config['monitor']['watch_region']
+    wt    = config['monitor'].get('white_threshold', 180)
+    wr    = config['monitor'].get('white_ratio_trigger', 0.25)
+
+    monitor = {'left': watch['x'], 'top': watch['y'], 'width': watch['width'], 'height': watch['height']}
+
     with mss() as sct:
         try:
             while True:
-                screenshot = sct.grab(monitor)
-                img = np.array(screenshot)[:, :, :3]
-                white_mask = np.all(img > threshold, axis=2)
-                ratio = white_mask.mean()
-                bar = '#' * int(ratio * 40)
-                status = 'DEATH!' if ratio >= trigger else 'alive '
-                print(f"\r白: {ratio:.3f} [{bar:<40}] {status}   ", end='', flush=True)
+                ow_focus = is_ow_foreground()
+                img      = np.array(sct.grab(monitor))[:, :, :3]
+                cyan_ok, is_death, white_ratio, left_cyan, right_cyan = check_icon_state(img, wt, wr)
+
+                is_playing = ow_focus and cyan_ok
+
+                ow_str    = "✅OW " if ow_focus    else "❌OW "
+                cyan_str  = "✅水色" if cyan_ok     else "❌水色"
+                white_bar = "#" * int(white_ratio * 30)
+                white_str = f"白:{white_ratio:.2f}[{white_bar:<30}]"
+
+                if is_death and is_playing:
+                    status = "💀 DEATH!"
+                elif is_playing:
+                    status = "🎮 PLAYING"
+                else:
+                    status = "😴 待機中 "
+
+                print(f"\r{ow_str} {cyan_str} {white_str} {status}   ", end='', flush=True)
                 time.sleep(0.1)
         except KeyboardInterrupt:
             print("\n終了")
 
 
 def main():
-    print("=== OW Pavlok キャリブレーション ===\n")
     config = load_config()
-    print("1. スクリーンショット撮影 + 分析")
-    print("2. リアルタイムモニター（デス状態で数値確認）")
-    choice = input("\n番号: ").strip()
-
-    if choice == '2':
-        live_monitor(config)
-    else:
-        print("\n3秒後に撮影します...")
-        for i in range(3, 0, -1):
-            print(f"{i}...")
-            time.sleep(1)
-        img_bgr = capture_watch_region(config)
-        analyze_white_ratio(img_bgr, config)
-        print("\n閾値調整は config.yaml の white_ratio_trigger を変更してください")
+    live_monitor(config)
 
 
 if __name__ == '__main__':
