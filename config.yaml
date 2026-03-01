@@ -3,10 +3,12 @@ pavlok:
   zap_intensity: 30
 
 monitor:
-  fps: 10                    # 0.1秒ごとにチェック（アニメが1秒未満なので高頻度に）
-  white_threshold: 180       # この値以上のRGB全チャンネル = 白ピクセル
-  white_ratio_trigger: 0.25  # 監視領域の25%以上が白 → デス判定
-  cooldown_seconds: 15       # 電撃後のクールダウン
+  fps: 10
+  white_threshold: 180
+  white_ratio_trigger: 0.25
+  cooldown_seconds: 15
+  confirm_frames: 1          # 1回検知で即電撃
+  active_confirm_sec: 3      # OWが3秒アクティブでプレイ中と判定
   watch_region:
     x: 57
     y: 892
