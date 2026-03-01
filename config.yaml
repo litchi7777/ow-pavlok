@@ -5,7 +5,7 @@ pavlok:
 monitor:
   fps: 10
   white_threshold: 180
-  white_ratio_trigger: 0.25
+  white_ratio_trigger: 0.40
   cooldown_seconds: 15
   confirm_frames: 1          # 1回検知で即電撃
   active_confirm_sec: 3      # OWが3秒アクティブでプレイ中と判定
