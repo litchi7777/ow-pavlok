@@ -84,8 +84,8 @@ pythonw detector.py
 4. トリガー: `ログオン時`
 5. 操作: `プログラムの開始`
 6. プログラム/スクリプト: `C:\Python39\pythonw.exe`（Pythonのパス）
-7. 引数の追加: `C:\path\to\ow-death-detector\detector.py`（スクリプトのパス）
-8. 開始: `C:\path\to\ow-death-detector`（作業ディレクトリ）
+7. 引数の追加: `C:\path\to\ow-pavlok\detector.py`（スクリプトのパス）
+8. 開始: `C:\path\to\ow-pavlok`（作業ディレクトリ）
 
 ### バッチファイルで起動
 
@@ -122,7 +122,7 @@ pythonw detector.py
 ## ファイル構成
 
 ```
-ow-death-detector/
+ow-pavlok/
 ├── README.md                # このファイル
 ├── detector.py              # メイン監視スクリプト
 ├── config.yaml              # 設定ファイル

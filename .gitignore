@@ -1,0 +1,14 @@
+# 個人設定（トークン入り）はgit管理しない
+config.yaml
+
+# キャリブレーション用の一時画像
+bottom_left_region_*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store

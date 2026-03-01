@@ -1,5 +1,5 @@
 pavlok:
-  access_token: "YOUR_TOKEN_HERE"
+  access_token: ""
   zap_intensity: 30
 
 monitor:

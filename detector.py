@@ -79,12 +79,19 @@ class DeathDetector:
     def send_zap(self):
         """Pavlok APIで電撃を送る"""
         try:
-            url = f"https://app.pavlok.com/api/v1/stimuli/shock/{self.zap_intensity}"
+            url = "https://api.pavlok.com/api/v5/stimulus/send"
             headers = {
-                'Authorization': f'Bearer {self.access_token}'
+                'Authorization': f'Bearer {self.access_token}',
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                "stimulus": {
+                    "stimulusType": "zap",
+                    "stimulusValue": self.zap_intensity
+                }
             }
 
-            response = requests.post(url, headers=headers, timeout=5)
+            response = requests.post(url, headers=headers, json=payload, timeout=5)
 
             if response.status_code == 200:
                 print(f"[{self._timestamp()}] ⚡ Pavlok 電撃送信成功 (強度: {self.zap_intensity})")
