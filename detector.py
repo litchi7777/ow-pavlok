@@ -2,14 +2,28 @@
 """
 Overwatch 2 Death Detector
 デス時のドクロアニメーション（白いピクセル急増）を検知してPavlok APIで電撃
+OWが起動していない場合はスキップ
 """
 import time
-import cv2
 import numpy as np
 import requests
 import yaml
+import psutil
 from mss import mss
 from datetime import datetime
+
+
+OW_PROCESS_NAMES = ['Overwatch', 'Overwatch.exe', 'OWClient', 'OWClient.exe']
+
+
+def is_ow_running():
+    for p in psutil.process_iter(['name']):
+        try:
+            if any(name.lower() in p.info['name'].lower() for name in OW_PROCESS_NAMES):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return False
 
 
 class DeathDetector:
@@ -26,13 +40,15 @@ class DeathDetector:
         self.white_ratio_trigger = self.config['monitor'].get('white_ratio_trigger', 0.25)
 
         self.last_zap_time = None
+        self.ow_was_running = False
         self.sct = mss()
 
         print(f"[{self._ts()}] Death Detector 起動")
         print(f"監視領域: x={self.watch_region['x']}, y={self.watch_region['y']}, "
               f"w={self.watch_region['width']}, h={self.watch_region['height']}")
         print(f"FPS: {self.fps} | 白ピクセル閾値: {self.white_threshold} | 発動割合: {self.white_ratio_trigger}")
-        print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒\n")
+        print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒")
+        print(f"OWプロセス監視: {OW_PROCESS_NAMES}\n")
 
     def _ts(self):
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -45,11 +61,9 @@ class DeathDetector:
             'height': self.watch_region['height']
         }
         screenshot = self.sct.grab(monitor)
-        return np.array(screenshot)[:, :, :3]  # BGR (drop alpha)
+        return np.array(screenshot)[:, :, :3]
 
     def detect_death(self, img_bgr):
-        """白いピクセルの割合でドクロアニメを検知"""
-        # 全チャンネルが threshold 以上 = 白っぽいピクセル
         white_mask = np.all(img_bgr > self.white_threshold, axis=2)
         white_ratio = white_mask.mean()
         return white_ratio >= self.white_ratio_trigger, white_ratio
@@ -67,7 +81,7 @@ class DeathDetector:
                 print(f"[{self._ts()}] ⚡ 電撃送信成功 (強度: {self.zap_intensity})")
                 return True
             else:
-                print(f"[{self._ts()}] ⚠ API エラー: {response.status_code} - {response.text}")
+                print(f"[{self._ts()}] ⚠ API エラー: {response.status_code}")
                 return False
         except Exception as e:
             print(f"[{self._ts()}] ⚠ 通信エラー: {e}")
@@ -80,9 +94,24 @@ class DeathDetector:
 
     def run(self):
         interval = 1.0 / self.fps
+        print(f"[{self._ts()}] OWの起動を待機中...")
+
         try:
             while True:
                 t = time.time()
+                ow_running = is_ow_running()
+
+                if not ow_running:
+                    if self.ow_was_running:
+                        print(f"[{self._ts()}] OW終了を検知。監視停止。")
+                        self.ow_was_running = False
+                    time.sleep(5)  # OW起動チェックは5秒ごと
+                    continue
+
+                if not self.ow_was_running:
+                    print(f"[{self._ts()}] OW起動を検知！監視開始。")
+                    self.ow_was_running = True
+
                 img = self.capture_region()
                 is_death, ratio = self.detect_death(img)
 
