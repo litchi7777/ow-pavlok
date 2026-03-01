@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
 """
 Overwatch 2 Death Detector
-デス時のドクロアニメーション（白いピクセル急増）を検知してPavlok APIで電撃
-OWが起動していない場合はスキップ
+OWがフォアグラウンドウィンドウの時のみ監視
 """
 import time
 import numpy as np
 import requests
 import yaml
-import psutil
+import sys
 from mss import mss
 from datetime import datetime
 
+# Windows専用
+if sys.platform == 'win32':
+    import win32gui
+else:
+    win32gui = None
 
-OW_PROCESS_NAMES = ['Overwatch', 'Overwatch.exe', 'OWClient', 'OWClient.exe']
+OW_WINDOW_KEYWORDS = ['overwatch', 'ow2']
 
 
-def is_ow_running():
-    for p in psutil.process_iter(['name']):
-        try:
-            if any(name.lower() in p.info['name'].lower() for name in OW_PROCESS_NAMES):
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-    return False
+def is_ow_foreground():
+    """OWがフォアグラウンドウィンドウかチェック"""
+    if win32gui is None:
+        return True  # Windows以外は常にTrue（テスト用）
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        title = win32gui.GetWindowText(hwnd).lower()
+        return any(kw in title for kw in OW_WINDOW_KEYWORDS)
+    except Exception:
+        return False
 
 
 class DeathDetector:
@@ -40,7 +46,7 @@ class DeathDetector:
         self.white_ratio_trigger = self.config['monitor'].get('white_ratio_trigger', 0.25)
 
         self.last_zap_time = None
-        self.ow_was_running = False
+        self.ow_was_active = False
         self.sct = mss()
 
         print(f"[{self._ts()}] Death Detector 起動")
@@ -48,7 +54,8 @@ class DeathDetector:
               f"w={self.watch_region['width']}, h={self.watch_region['height']}")
         print(f"FPS: {self.fps} | 白ピクセル閾値: {self.white_threshold} | 発動割合: {self.white_ratio_trigger}")
         print(f"電撃強度: {self.zap_intensity} | クールダウン: {self.cooldown_seconds}秒")
-        print(f"OWプロセス監視: {OW_PROCESS_NAMES}\n")
+        print(f"OWウィンドウキーワード: {OW_WINDOW_KEYWORDS}\n")
+        print(f"[{self._ts()}] OWがアクティブになるのを待機中...")
 
     def _ts(self):
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -94,23 +101,22 @@ class DeathDetector:
 
     def run(self):
         interval = 1.0 / self.fps
-        print(f"[{self._ts()}] OWの起動を待機中...")
 
         try:
             while True:
                 t = time.time()
-                ow_running = is_ow_running()
+                ow_active = is_ow_foreground()
 
-                if not ow_running:
-                    if self.ow_was_running:
-                        print(f"[{self._ts()}] OW終了を検知。監視停止。")
-                        self.ow_was_running = False
-                    time.sleep(5)  # OW起動チェックは5秒ごと
+                if not ow_active:
+                    if self.ow_was_active:
+                        print(f"[{self._ts()}] OWが非アクティブ。監視一時停止。")
+                        self.ow_was_active = False
+                    time.sleep(1)
                     continue
 
-                if not self.ow_was_running:
-                    print(f"[{self._ts()}] OW起動を検知！監視開始。")
-                    self.ow_was_running = True
+                if not self.ow_was_active:
+                    print(f"[{self._ts()}] OWがアクティブ！監視開始。")
+                    self.ow_was_active = True
 
                 img = self.capture_region()
                 is_death, ratio = self.detect_death(img)
