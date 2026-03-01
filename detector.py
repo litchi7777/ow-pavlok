@@ -51,7 +51,7 @@ def check_state(img_bgr, white_threshold=180, white_ratio_trigger=0.25):
     rc = is_cyan(rb)
     cyan_ok = lc and rc
     white_ratio = np.all(img_bgr > white_threshold, axis=2).mean()
-    is_death = white_ratio >= white_ratio_trigger
+    is_death = white_ratio_trigger <= white_ratio < 1.0
     return cyan_ok, is_death, white_ratio, lc, rc
 
 

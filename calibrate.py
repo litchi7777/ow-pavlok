@@ -95,7 +95,7 @@ def live_monitor(config):
                     lc = is_cyan(lb); rc = is_cyan(rb)
                     cyan_ok = lc and rc
                     white_ratio = np.all(img > wt, axis=2).mean()
-                    is_death   = white_ratio >= wr
+                    is_death   = wr <= white_ratio < 1.0
                     is_playing = ow_focus and cyan_ok
 
                     # min/max更新
